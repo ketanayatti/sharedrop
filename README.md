@@ -10,7 +10,7 @@ It's built with Kotlin Multiplatform and Compose Multiplatform, so most of the c
 
 | Desktop | Android |
 |---------|---------|
-| ![Desktop App](docs/screenshots/mac.png) | ![Android App](docs/screenshots/android.jpg) |
+| ![Desktop App](docs/screenshots/ShareDrop_Mac_v1.png) | ![Android App](docs/screenshots/ShareDrop_Android_V1.jpg) |
 
 ---
 
