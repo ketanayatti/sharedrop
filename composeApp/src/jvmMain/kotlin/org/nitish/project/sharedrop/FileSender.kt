@@ -1,5 +1,6 @@
 package org.nitish.project.sharedrop
 
+import java.io.ByteArrayInputStream
 import java.net.Socket
 
 actual class FileSender {
@@ -8,6 +9,7 @@ actual class FileSender {
         port: Int,
         fileName: String,
         bytes: ByteArray,
+        onProgress: (Float) -> Unit,
         onResult: (Boolean) -> Unit
     ) {
         Thread {
@@ -17,7 +19,22 @@ actual class FileSender {
                 val fileNameBytes = fileName.toByteArray()
                 output.write(fileNameBytes.size)
                 output.write(fileNameBytes)
-                output.write(bytes)
+
+                val totalBytes = bytes.size.toLong()
+                var bytesSent = 0L
+                val inputStream = ByteArrayInputStream(bytes)
+                val buffer = ByteArray(8192)
+
+                var bytesRead = inputStream.read(buffer)
+                while (bytesRead != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    bytesSent += bytesRead
+
+                    onProgress(bytesSent.toFloat() / totalBytes.toFloat())
+
+                    bytesRead = inputStream.read(buffer)
+                }
+
                 output.flush()
                 socket.close()
                 onResult(true)
