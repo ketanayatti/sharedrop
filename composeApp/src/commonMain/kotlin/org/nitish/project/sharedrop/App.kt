@@ -5,9 +5,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,6 +35,7 @@ fun HomeScreen() {
     val receivedFiles = remember { mutableStateListOf<String>() }
     var selectedDevice by remember { mutableStateOf<DiscoveredDevice?>(null) }
     var statusMessage by remember { mutableStateOf("") }
+    var transferProgress by remember { mutableStateOf(0f) }
 
     LaunchedEffect(Unit) {
         advertiser.startAdvertising(localDeviceName, 8080)
@@ -79,11 +82,34 @@ fun HomeScreen() {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (statusMessage.isNotEmpty()) {
-                    Text(
-                        text = statusMessage,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = statusMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        if (transferProgress > 0f && transferProgress < 1f) {
+                            Text(
+                                text = "${(transferProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (transferProgress > 0f && transferProgress < 1f) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { transferProgress },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
                 val filePicker = remember { FilePicker() }
@@ -96,18 +122,29 @@ fun HomeScreen() {
                         } else {
                             filePicker.pickFile { fileName, bytes ->
                                 statusMessage = "Sending $fileName..."
+                                transferProgress = 0.01f
+
                                 FileSender().sendFile(
                                     host = device.host,
                                     port = device.port,
                                     fileName = fileName,
-                                    bytes = bytes
-                                ) { success ->
-                                    statusMessage = if (success) "Sent $fileName!" else "Failed to send $fileName!"
-                                }
+                                    bytes = bytes,
+                                    onProgress = { progress ->
+                                        scope.launch(Dispatchers.Main) {
+                                            transferProgress = progress
+                                        }
+                                    },
+                                    onResult = { success ->
+                                        scope.launch(Dispatchers.Main) {
+                                            statusMessage = if (success) "Sent $fileName!" else "Failed!"
+                                            transferProgress = 0f
+                                        }
+                                    }
+                                )
                             }
                         }
                     }
-                ) {
+                ){
                     Text(if (selectedDevice == null) "Select a device to send" else "Send File to ${selectedDevice!!.name}")
                 }
             }
