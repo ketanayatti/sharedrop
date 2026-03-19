@@ -70,13 +70,17 @@ fun HomeScreen() {
     var statusMessage by remember { mutableStateOf("") }
     var transferProgress by remember { mutableStateOf(0f) }
     
-    val settings = remember { Settings(dataStore = provideDataStore()) }
+    val settings = remember { Settings(deviceNameStorage = provideDeviceNameStorage()) }
     val appSettings by settings.settingsFlow.collectAsStateWithLifecycle(initialValue = AppSettings())
 
     val localDeviceName = appSettings.localName
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
+
+    LaunchedEffect(settings) {
+        settings.ensureLoaded()
+    }
 
     LaunchedEffect(localDeviceName, lifecycleState) {
         if (localDeviceName == null) return@LaunchedEffect
