@@ -1,5 +1,7 @@
 package org.nitish.project.sharedrop
 
+import android.content.Context
+import android.net.wifi.WifiManager
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -7,8 +9,16 @@ import java.net.InetAddress
 actual class DeviceDiscovery {
     private var isRunning = false
     private var socket: DatagramSocket? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     actual fun startDiscovery(onDeviceFound: (DiscoveredDevice) -> Unit) {
+        if (AndroidContext.context == null) throw IllegalStateException("Context is not available")
+        val wifiManager =
+            AndroidContext.context!!.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        multicastLock = wifiManager.createMulticastLock("sharedrop_lock").apply {
+            setReferenceCounted(true)
+            acquire()
+        }
         isRunning = true
         Thread {
             try {
@@ -25,15 +35,21 @@ actual class DeviceDiscovery {
                             val name = parts[1]
                             val port = parts[2].toIntOrNull() ?: 8080
                             val host = packet.address.hostAddress ?: continue
-                            println("Discovery: Found $name at $host:$port")
                             val localIp = java.net.NetworkInterface.getNetworkInterfaces()
                                 .asSequence()
                                 .flatMap { it.inetAddresses.asSequence() }
                                 .firstOrNull { !it.isLoopbackAddress && it is java.net.Inet4Address }
                                 ?.hostAddress
                             if (host == localIp) continue
+                            println("Discovery: Found $name at $host:$port")
                             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                onDeviceFound(DiscoveredDevice(name = name, host = host, port = port))
+                                onDeviceFound(
+                                    DiscoveredDevice(
+                                        name = name,
+                                        host = host,
+                                        port = port
+                                    )
+                                )
                             }
                         }
                     }
@@ -46,6 +62,12 @@ actual class DeviceDiscovery {
 
     actual fun stopDiscovery() {
         isRunning = false
+
+        multicastLock?.let {
+            if (it.isHeld) it.release()
+        }
+        multicastLock = null
+
         socket?.close()
         socket = null
     }
