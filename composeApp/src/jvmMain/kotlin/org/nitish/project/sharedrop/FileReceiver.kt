@@ -1,9 +1,11 @@
 package org.nitish.project.sharedrop
 
+import kotlinx.coroutines.runBlocking
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.ByteBuffer
 
 actual class FileReceiver {
     private var serverSocket: ServerSocket? = null
@@ -18,46 +20,68 @@ actual class FileReceiver {
             try {
                 serverSocket = ServerSocket(port)
                 isRunning = true
+
                 while (isRunning) {
                     val client: Socket = serverSocket?.accept() ?: break
+
                     Thread {
-                        try {
-                            val input = client.getInputStream()
-                            val fileNameLength = input.read()
-                            val fileNameBytes = ByteArray(fileNameLength)
-                            input.read(fileNameBytes)
-                            val fileName = String(fileNameBytes)
+                        runBlocking {
+                            try {
+                                val input = DataInputStream(client.getInputStream())
+                                val output = DataOutputStream(client.getOutputStream())
 
-                            val fileLengthBytes = ByteArray(8)
-                            input.read(fileLengthBytes)
-                            val fileLength = ByteBuffer.wrap(fileLengthBytes).getLong()
+                                // 1. Handshake: Generate and send local public key
+                                val keyPair = CryptoEngine.generateKeyPair()
+                                output.writeInt(keyPair.publicKeyBytes.size)
+                                output.write(keyPair.publicKeyBytes)
+                                output.flush()
 
-                            val systemTempDir = System.getProperty("java.io.tmpdir")
-                            val targetFile = File(systemTempDir, "temp_$fileName")
+                                // 2. Handshake: Receive remote public key
+                                val senderPubKeySize = input.readInt()
+                                val senderPubKey = ByteArray(senderPubKeySize)
+                                input.readFully(senderPubKey)
 
-                            targetFile.outputStream().use { output ->
-                                val buffer = ByteArray(8192)
-                                var totalRead: Long = 0
+                                // 3. Derive End-to-End AES key
+                                val aesKey = CryptoEngine.deriveAesKey(keyPair.privateKey, senderPubKey)
 
+                                // 4. Receive and decrypt metadata
+                                val encFileNameSize = input.readInt()
+                                val encFileName = ByteArray(encFileNameSize)
+                                input.readFully(encFileName)
+                                val fileName = String(CryptoEngine.decrypt(aesKey, encFileName))
+
+                                val encFileSizeSize = input.readInt()
+                                val encFileSize = ByteArray(encFileSizeSize)
+                                input.readFully(encFileSize)
+                                val fileLength = String(CryptoEngine.decrypt(aesKey, encFileSize)).toLong()
+
+                                val systemTempDir = System.getProperty("java.io.tmpdir")
+                                val tempFile = File(systemTempDir, "temp_$fileName")
                                 onProgress(fileName, 0f)
 
-                                while (totalRead < fileLength) {
-                                    val toRead = buffer.size.toLong()
-                                        .coerceAtMost(fileLength - totalRead).toInt()
-                                    val bytesRead = input.read(buffer, 0, toRead)
+                                // 5. Receive, decrypt, and flush chunks to disk to prevent OOM
+                                var totalDecryptedRead = 0L
+                                tempFile.outputStream().use { fileOut ->
+                                    while (totalDecryptedRead < fileLength) {
+                                        val encChunkSize = input.readInt()
+                                        val encChunk = ByteArray(encChunkSize)
 
-                                    if (bytesRead == -1) break
+                                        // readFully ensures the whole AES-GCM block is downloaded before decryption
+                                        input.readFully(encChunk)
 
-                                    output.write(buffer, 0, bytesRead)
-                                    totalRead += bytesRead
+                                        val decChunk = CryptoEngine.decrypt(aesKey, encChunk)
+                                        fileOut.write(decChunk)
 
-                                    onProgress(fileName, totalRead.toFloat() / fileLength.toFloat())
+                                        totalDecryptedRead += decChunk.size
+                                        onProgress(fileName, totalDecryptedRead.toFloat() / fileLength.toFloat())
+                                    }
                                 }
-                                onFileReceived(fileName, targetFile.absolutePath)
-                                output.flush()
+
+                                onFileReceived(fileName, tempFile.absolutePath)
+                                client.close()
+                            } catch (e: Exception) {
+                                e.printStackTrace()
                             }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
                         }
                     }.start()
                 }

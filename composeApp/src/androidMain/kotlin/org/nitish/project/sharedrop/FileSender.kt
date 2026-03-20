@@ -1,8 +1,10 @@
 package org.nitish.project.sharedrop
 
+import kotlinx.coroutines.runBlocking
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.net.Socket
-import java.nio.ByteBuffer
 
 actual class FileSender {
     actual fun sendFile(
@@ -13,38 +15,66 @@ actual class FileSender {
         onResult: (Boolean) -> Unit
     ) {
         Thread {
-            try {
-                val socket = Socket(host, port)
-                val output = socket.getOutputStream()
+            runBlocking {
+                try {
+                    val socket = Socket(host, port)
+                    val input = DataInputStream(socket.getInputStream())
+                    val output = DataOutputStream(socket.getOutputStream())
 
-                val inputFile = File(absolutePath)
+                    // 1. Handshake: Receive remote public key
+                    val receiverPubKeySize = input.readInt()
+                    val receiverPubKey = ByteArray(receiverPubKeySize)
+                    input.readFully(receiverPubKey)
 
-                val fileNameBytes = inputFile.name.toByteArray()
-                output.write(fileNameBytes.size)
-                output.write(fileNameBytes)
+                    // 2. Handshake: Generate and send local public key
+                    val keyPair = CryptoEngine.generateKeyPair()
+                    output.writeInt(keyPair.publicKeyBytes.size)
+                    output.write(keyPair.publicKeyBytes)
+                    output.flush()
 
-                val totalBytes = inputFile.length()
-                ByteBuffer.wrap(ByteArray(8)).putLong(totalBytes).array().also { output.write(it) }
+                    // 3. Derive End-to-End AES key
+                    val aesKey = CryptoEngine.deriveAesKey(keyPair.privateKey, receiverPubKey)
 
-                var bytesSent = 0L
-                val inputStream = inputFile.inputStream()
-                val buffer = ByteArray(8192)
+                    val inputFile = File(absolutePath)
+                    val totalBytes = inputFile.length()
 
-                var bytesRead = inputStream.read(buffer)
-                while (bytesRead != -1) {
-                    output.write(buffer, 0, bytesRead)
-                    bytesSent += bytesRead
+                    // 4. Send encrypted metadata (Filename & Size)
+                    val encFileName = CryptoEngine.encrypt(aesKey, inputFile.name.toByteArray())
+                    output.writeInt(encFileName.size)
+                    output.write(encFileName)
 
-                    onProgress(bytesSent.toFloat() / totalBytes.toFloat())
+                    val encFileSize = CryptoEngine.encrypt(aesKey, totalBytes.toString().toByteArray())
+                    output.writeInt(encFileSize.size)
+                    output.write(encFileSize)
+                    output.flush()
 
-                    bytesRead = inputStream.read(buffer)
+                    // 5. Stream file in encrypted 8KB chunks to prevent OOM
+                    var bytesSent = 0L
+                    val inputStream = inputFile.inputStream()
+                    val buffer = ByteArray(8192)
+
+                    var bytesRead = inputStream.read(buffer)
+                    while (bytesRead != -1) {
+                        val chunkData = if (bytesRead == buffer.size) buffer else buffer.copyOfRange(0, bytesRead)
+                        val encryptedChunk = CryptoEngine.encrypt(aesKey, chunkData)
+
+                        // Send chunk size followed by the encrypted payload
+                        output.writeInt(encryptedChunk.size)
+                        output.write(encryptedChunk)
+
+                        bytesSent += bytesRead
+                        onProgress(bytesSent.toFloat() / totalBytes.toFloat())
+
+                        bytesRead = inputStream.read(buffer)
+                    }
+
+                    output.flush()
+                    socket.close()
+                    onResult(true)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    onResult(false)
                 }
-                output.flush()
-                socket.close()
-                onResult(true)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                onResult(false)
             }
         }.start()
     }

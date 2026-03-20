@@ -20,39 +20,103 @@ I wanted to send files between my Mac and Android phone without using Google Dri
 
 ---
 
-## How it works
+## How It Works
 
-Discovery and transfer are both pretty straightforward.
+ShareDrop operates entirely peer-to-peer. Nothing goes through a central server or the internet; the two devices talk directly to each other over your local network.
 
-For discovery, every device running the app sends a small UDP broadcast packet every 2 seconds. Any other device on the same network that's listening on port 8888 picks it up and shows that device in the list.
+The process is divided into two distinct phases: Discovery (Advertising) and Secure File Transfer.
 
-For transfer, once you select a device and pick a file, the app opens a direct TCP connection to that device on port 8080 and sends the file bytes. The receiving device saves it straight to the Downloads folder.
+### 1. Device Discovery (Advertising)
 
+Discovery is completely decentralized. Every device running the app sends a small UDP broadcast packet every 2 seconds. Any other device on the same network listening on port 8888 picks it up, parses the payload, and displays that device in the available peers list.
+
+```mermaid
+sequenceDiagram
+    participant S as Sender (Neon Fox)
+    participant R as Receiver (Silent Owl)
+
+    Note over S, R: Device Discovery (Advertising)
+    loop Every 2 seconds
+        S-->>R: UDP Broadcast: "SHAREDROP:Neon Fox:8080"
+    end
 ```
-Sender                            Receiver
-  |                                   |
-  |  UDP: "SHAREDROP:Mac-nitish:8080" |
-  | --------------------------------> | (discovery, every 2s)
-  |                                   |
-  |  TCP: filename + file bytes       |
-  | --------------------------------> | (transfer)
-  |                                   | saves to Downloads
+
+### 2. Secure File Transfer
+
+Once you select a device and pick a file, the app opens a direct TCP connection to that device on port 8080. To guarantee End-to-End Encryption (E2EE) and maintain a tiny memory footprint, the file is never loaded fully into RAM. Instead, it relies on a **Chunk-by-Chunk Encryption/Decryption** stream.
+
+#### Security Specifications
+* **Key Exchange:** Elliptic-Curve Diffie-Hellman (ECDH) over the NIST P-256 curve.
+* **Symmetric Encryption:** AES-256-GCM (Galois/Counter Mode).
+* **Integrity:** Implicit Initialization Vector (IV) and built-in MAC authentication tags to prevent payload tampering.
+
+#### Protocol Flow (Handshake & Transfer)
+
+```mermaid
+sequenceDiagram
+    participant S as Sender (Neon Fox)
+    participant R as Receiver (Silent Owl)
+    
+    Note over S, R: 1. Connection & Handshake
+    S->>R: Open TCP Socket Connection (Port 8080)
+    R->>S: Send Receiver's ECDH Public Key (P-256)
+    S->>R: Send Sender's ECDH Public Key (P-256)
+    
+    Note over S, R: 2. Shared Secret Generation
+    S-->>S: Derive AES-256 Key
+    R-->>R: Derive AES-256 Key
+    
+    Note over S, R: 3. Metadata Exchange
+    S->>R: Encrypt(Filename) + Encrypt(File Size)
+    R-->>R: Decrypt Metadata & Create Temp File
+    
+    Note over S, R: 4. Chunked Data Stream (8KB Blocks)
+    loop Until EOF
+        S-->>S: Read 8KB from disk -> Encrypt(AES-GCM)
+        S->>R: Send Size(EncryptedChunk)
+        S->>R: Send EncryptedChunk Bytes
+        R-->>R: input.readFully(Size) -> Decrypt(AES-GCM)
+        R-->>R: Write Plaintext Chunk to Disk
+    end
+    
+    Note over S, R: 5. Teardown
+    S->>R: Close Socket
 ```
 
-Nothing goes through a server. The two devices talk directly to each other.
+#### Memory Efficiency (`OOM` Prevention)
+Encrypting an entire file at once requires allocating `FileSize + CipherOverhead` bytes in RAM. For mobile platforms like Android, this guarantees an application crash for large payloads.
+
+ShareDrop solves this by:
+1. Slicing the file into strictly sized **8192-byte chunks**.
+2. Encrypting and transmitting one chunk at a time.
+3. Prepending the exact `Int` size of the upcoming encrypted payload (since AES-GCM adds a ~28 byte overhead for the implicit Nonce and MAC Tag).
+4. Using `DataInputStream.readFully()` on the receiving device to guarantee the exact AES block is buffered before attempting decryption. This prevents `AEADBadTagException` crashes caused by network desynchronization or fragmented TCP packets.
+
+#### Supported platforms
+
+| Platform             | E2EE Implemented | Tested |
+|:---------------------|:----------------:|:------:|
+| **🤖 Android**       |      ✅ Yes       | ✅ Yes  | 
+| **💻 Windows** (JVM) |      ✅ Yes       | ✅ Yes  | 
+| **🐧 Linux** (JVM)   |      ⏳ WIP       |  ❌ No  | 
+| **🍏 macOS** (JVM)   |      ⏳ WIP       |  ❌ No  | 
+| **🍎 iOS**           |       ❌ No       |  ❌ No  | 
+
+*(Legend: ✅ = Fully Working & Tested | ⏳ = Work In Progress / Untested | ❌ = Not Supported Yet)*
+
 
 ---
 
 ## Platform support
 
-| Platform | Status |
-|----------|--------|
-| Android | Working |
-| macOS | Working |
-| Windows | Working |
-| Linux | Working |
-| iOS | In progress |
-| Web | In progress |
+| Platform | Status      |
+|----------|-------------|
+| Android  | Working     |
+| macOS    | Working     |
+| Windows  | Working     |
+| Linux    | Working     |
+| iOS      | In progress |
+| Web      | In progress |
 
 Desktop (Mac, Windows, Linux) all run through the same JVM target, so if it works on one it works on all three.
 

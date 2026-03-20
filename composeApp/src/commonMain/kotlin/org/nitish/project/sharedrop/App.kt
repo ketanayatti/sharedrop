@@ -229,6 +229,14 @@ fun HomeScreen() {
             modifier = Modifier.fillMaxSize().padding(innerPadding).padding(16.dp)
         ) {
             Text(
+                text = "Your device name: ${localDeviceName ?: "Loading..."}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(modifier = Modifier.fillMaxWidth())
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
                 text = "Nearby Devices", style = MaterialTheme.typography.titleMedium
             )
             Spacer(modifier = Modifier.height(8.dp))
