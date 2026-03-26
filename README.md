@@ -96,13 +96,13 @@ ShareDrop solves this by:
 
 | Platform             | E2EE Implemented | Tested |
 |:---------------------|:----------------:|:------:|
-| **🤖 Android**       |      ✅ Yes       | ✅ Yes  | 
-| **💻 Windows** (JVM) |      ✅ Yes       | ✅ Yes  | 
-| **🐧 Linux** (JVM)   |      ⏳ WIP       |  ❌ No  | 
-| **🍏 macOS** (JVM)   |      ⏳ WIP       |  ❌ No  | 
-| **🍎 iOS**           |       ❌ No       |  ❌ No  | 
+| **Android**       |       Yes       |  Yes  | 
+| **Windows** (JVM) |       Yes       |  Yes  | 
+| **Linux** (JVM)   |       WIP       |   No  | 
+| **macOS** (JVM)   |       WIP       |   No  | 
+| **iOS**           |        No       |   No  | 
 
-*(Legend: ✅ = Fully Working & Tested | ⏳ = Work In Progress / Untested | ❌ = Not Supported Yet)*
+*(Legend: ✅ = Fully Working & Tested | ⏳ = Work In Progress / Untested |  = Not Supported Yet)*
 
 
 ---
@@ -241,7 +241,7 @@ To contribute:
 
 For bigger changes, open an issue first so we can discuss before you spend time on it.
 
-## 💬 Community
+## Community
 
 Join the **ShareDrop Discord server** for:
 - contributor discussions
@@ -250,7 +250,7 @@ Join the **ShareDrop Discord server** for:
 - PR reviews
 - testing updates
 
-👉 [Join the ShareDrop Discord Server](https://discord.gg/vJxAn2BeXB)
+[Join the ShareDrop Discord Server](https://discord.gg/vJxAn2BeXB)
 
 ---
 
