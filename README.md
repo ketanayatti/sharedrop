@@ -205,7 +205,6 @@ The pattern used throughout is Kotlin's `expect/actual` — `commonMain` defines
 
 - Both devices must be on the same WiFi network. It won't work over mobile data or across different networks.
 - iOS and Web are not fully working yet.
-- There's no encryption on the transfer right now. Anyone on the same network running the app could receive files sent to them. Encryption is planned.
 - Very large files may be slow depending on your network.
 
 ---
@@ -213,7 +212,6 @@ The pattern used throughout is Kotlin's `expect/actual` — `commonMain` defines
 ## Roadmap
 
 - Send multiple files at once
-- Encrypted transfer
 - iOS support
 - Web support
 - Choose where received files are saved
