@@ -61,7 +61,7 @@ jobs:
 
   release:
     needs: ci
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/feature/add-cicd-pipeline' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
