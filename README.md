@@ -6,10 +6,19 @@ It's built with Kotlin Multiplatform and Compose Multiplatform, so most of the c
 
 ---
 
+## Download
+
+Don't want to build it yourself? Download the latest APK directly:
+
+**[⬇ Download Latest APK](https://github.com/nitish058/sharedrop/releases/tag/latest)**
+
+> Android only. Install it by opening the downloaded file on your phone.
+> You may need to allow "Install from unknown sources" in your Android settings.
+
 ## Screenshots
 
-| Desktop | Android |
-|---------|---------|
+| Desktop                                               | Android                                                   |
+| ----------------------------------------------------- | --------------------------------------------------------- |
 | ![Desktop App](docs/screenshots/ShareDrop_Mac_v1.png) | ![Android App](docs/screenshots/ShareDrop_Android_V1.jpg) |
 
 ---
@@ -46,9 +55,10 @@ sequenceDiagram
 Once you select a device and pick a file, the app opens a direct TCP connection to that device on port 8080. To guarantee End-to-End Encryption (E2EE) and maintain a tiny memory footprint, the file is never loaded fully into RAM. Instead, it relies on a **Chunk-by-Chunk Encryption/Decryption** stream.
 
 #### Security Specifications
-* **Key Exchange:** Elliptic-Curve Diffie-Hellman (ECDH) over the NIST P-256 curve.
-* **Symmetric Encryption:** AES-256-GCM (Galois/Counter Mode).
-* **Integrity:** Implicit Initialization Vector (IV) and built-in MAC authentication tags to prevent payload tampering.
+
+- **Key Exchange:** Elliptic-Curve Diffie-Hellman (ECDH) over the NIST P-256 curve.
+- **Symmetric Encryption:** AES-256-GCM (Galois/Counter Mode).
+- **Integrity:** Implicit Initialization Vector (IV) and built-in MAC authentication tags to prevent payload tampering.
 
 #### Protocol Flow (Handshake & Transfer)
 
@@ -56,20 +66,20 @@ Once you select a device and pick a file, the app opens a direct TCP connection 
 sequenceDiagram
     participant S as Sender (Neon Fox)
     participant R as Receiver (Silent Owl)
-    
+
     Note over S, R: 1. Connection & Handshake
     S->>R: Open TCP Socket Connection (Port 8080)
     R->>S: Send Receiver's ECDH Public Key (P-256)
     S->>R: Send Sender's ECDH Public Key (P-256)
-    
+
     Note over S, R: 2. Shared Secret Generation
     S-->>S: Derive AES-256 Key
     R-->>R: Derive AES-256 Key
-    
+
     Note over S, R: 3. Metadata Exchange
     S->>R: Encrypt(Filename) + Encrypt(File Size)
     R-->>R: Decrypt Metadata & Create Temp File
-    
+
     Note over S, R: 4. Chunked Data Stream (8KB Blocks)
     loop Until EOF
         S-->>S: Read 8KB from disk -> Encrypt(AES-GCM)
@@ -78,15 +88,17 @@ sequenceDiagram
         R-->>R: input.readFully(Size) -> Decrypt(AES-GCM)
         R-->>R: Write Plaintext Chunk to Disk
     end
-    
+
     Note over S, R: 5. Teardown
     S->>R: Close Socket
 ```
 
 #### Memory Efficiency (`OOM` Prevention)
+
 Encrypting an entire file at once requires allocating `FileSize + CipherOverhead` bytes in RAM. For mobile platforms like Android, this guarantees an application crash for large payloads.
 
 ShareDrop solves this by:
+
 1. Slicing the file into strictly sized **8192-byte chunks**.
 2. Encrypting and transmitting one chunk at a time.
 3. Prepending the exact `Int` size of the upcoming encrypted payload (since AES-GCM adds a ~28 byte overhead for the implicit Nonce and MAC Tag).
@@ -94,23 +106,22 @@ ShareDrop solves this by:
 
 #### Supported platforms
 
-| Platform             | E2EE Implemented | Tested |
-|:---------------------|:----------------:|:------:|
-| **Android**       |       Yes       |  Yes  | 
-| **Windows** (JVM) |       Yes       |  Yes  | 
-| **Linux** (JVM)   |       WIP       |   No  | 
-| **macOS** (JVM)   |       WIP       |   No  | 
-| **iOS**           |        No       |   No  | 
+| Platform          | E2EE Implemented | Tested |
+| :---------------- | :--------------: | :----: |
+| **Android**       |       Yes        |  Yes   |
+| **Windows** (JVM) |       Yes        |  Yes   |
+| **Linux** (JVM)   |       WIP        |   No   |
+| **macOS** (JVM)   |       WIP        |   No   |
+| **iOS**           |        No        |   No   |
 
-*(Legend:  = Fully Working & Tested |  = Work In Progress / Untested |  = Not Supported Yet)*
-
+_(Legend: = Fully Working & Tested | = Work In Progress / Untested | = Not Supported Yet)_
 
 ---
 
 ## Platform support
 
 | Platform | Status      |
-|----------|-------------|
+| -------- | ----------- |
 | Android  | Working     |
 | macOS    | Working     |
 | Windows  | Working     |
@@ -242,6 +253,7 @@ For bigger changes, open an issue first so we can discuss before you spend time 
 ## Community
 
 Join the **ShareDrop Discord server** for:
+
 - contributor discussions
 - bug reports
 - feature ideas
