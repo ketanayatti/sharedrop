@@ -6,14 +6,27 @@ It's built with Kotlin Multiplatform and Compose Multiplatform, so most of the c
 
 ---
 
-## Download
+## 📥 Download
 
-Don't want to build it yourself? Download the latest APK directly:
+### 🚀 Latest Version
 
-**[⬇ Download Latest APK](https://github.com/nitish058/sharedrop/releases/tag/latest)**
+#### 📱 Android
 
-> Android only. Install it by opening the downloaded file on your phone.
-> You may need to allow "Install from unknown sources" in your Android settings.
+[![Download APK](https://img.shields.io/badge/Download-Android%20APK-green?style=for-the-badge&logo=android)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.apk)
+
+---
+
+#### 💻 Desktop
+
+[![Download macOS (DMG)](https://img.shields.io/badge/Download-macOS%20DMG-black?style=for-the-badge&logo=apple)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.dmg)
+
+[![Download Windows (EXE)](https://img.shields.io/badge/Download-Windows%20EXE-blue?style=for-the-badge&logo=windows)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.exe)
+
+[![Download Linux (DEB)](https://img.shields.io/badge/Download-Linux%20DEB-orange?style=for-the-badge&logo=linux)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.deb)
+
+---
+
+👉 [View All Releases](https://github.com/nitish058/sharedrop/releases)
 
 ## Screenshots
 
