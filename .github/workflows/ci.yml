@@ -1,27 +1,34 @@
-name: Production CI/CD Pipeline
+name: ShareDrop CI/CD
 
 on:
   push:
-    branches: [main, dev, feature/**]
+    branches: [main, dev, 'feature/**']
   pull_request:
+    branches: [main, dev]
 
 permissions:
   contents: write
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  JAVA_VERSION: 17
+  JAVA_VERSION: '17'
 
+# ─────────────────────────────────────────────────────────────────
+# STAGE 1 · GUARD
+# Lint + tests first. Nothing runs if this fails.
+# Also decides version and whether this push should produce a release.
+# ─────────────────────────────────────────────────────────────────
 jobs:
-
-# ---------------------------
-# 1. CI (FAIL FAST)
-# ---------------------------
-  ci:
+  guard:
+    name: "Guard · Lint + Tests"
     runs-on: ubuntu-latest
+    outputs:
+      version:        ${{ steps.meta.outputs.version }}
+      should_release: ${{ steps.meta.outputs.should_release }}
+      is_prerelease:  ${{ steps.meta.outputs.is_prerelease }}
 
     steps:
       - uses: actions/checkout@v4
@@ -31,23 +38,65 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
+          restore-keys: gradle-${{ runner.os }}-
 
-      - name: Lint + Unit Tests
-        run: ./gradlew lint testDebugUnitTest --no-daemon
+      - name: Lint
+        run: ./gradlew lint --no-daemon
 
-# ---------------------------
-# 2. BUILD (PARALLEL)
-# ---------------------------
+      # Run both Android and JVM unit tests — the original only ran Android
+      - name: Unit tests (Android + JVM)
+        run: ./gradlew testDebugUnitTest jvmTest --no-daemon
+
+      # Compute version + release intent once. All downstream jobs read outputs.
+      - name: Set build metadata
+        id: meta
+        run: |
+          VERSION="v$(date +'%Y.%m.%d')-${{ github.run_number }}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # PRs: build and test, never release
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false"  >> $GITHUB_OUTPUT
+
+          # main: stable release
+          elif [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "should_release=true"  >> $GITHUB_OUTPUT
+            echo "is_prerelease=false"  >> $GITHUB_OUTPUT
+
+          # dev: pre-release (lets contributors download real builds)
+          elif [[ "${{ github.ref_name }}" == "dev" ]]; then
+            echo "should_release=true"  >> $GITHUB_OUTPUT
+            echo "is_prerelease=true"   >> $GITHUB_OUTPUT
+
+          # feature branches: build only, no release
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false"  >> $GITHUB_OUTPUT
+          fi
+
+# ─────────────────────────────────────────────────────────────────
+# STAGE 2 · PLATFORM BUILDS (parallel)
+#
+# Android runs on ubuntu.
+# Desktop uses a 3-way matrix so all three OS installers are built
+# in parallel — the original only built macOS and would produce a
+# .dmg but never an .msi or .deb.
+#
+# Note: build.gradle.kts declares TargetFormat.Dmg, .Msi, .Deb —
+# so the correct Windows extension is .msi, not .exe.
+# Each job also drops a SHA256 checksum file alongside its artifact.
+# ─────────────────────────────────────────────────────────────────
   build-android:
+    name: "Build · Android APK"
     runs-on: ubuntu-latest
-    needs: ci
+    needs: guard
 
     steps:
       - uses: actions/checkout@v4
@@ -57,22 +106,48 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Build APK (Release)
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Build APK
         run: ./gradlew :composeApp:assembleRelease --no-daemon
 
-      - name: Rename APK
+      - name: Collect + checksum
         run: |
           APK=$(find composeApp/build/outputs -name "*release*.apk" | head -n 1)
-          mv "$APK" sharedrop.apk
+          cp "$APK" sharedrop.apk
+          sha256sum sharedrop.apk > sharedrop.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: android-apk
-          path: sharedrop.apk
+          name: android
+          path: |
+            sharedrop.apk
+            sharedrop.apk.sha256
 
   build-desktop:
-    runs-on: macos-latest
-    needs: ci
+    name: "Build · Desktop (${{ matrix.os }})"
+    runs-on: ${{ matrix.runner }}
+    needs: guard
+
+    strategy:
+      fail-fast: false   # let all three platforms finish even if one fails
+      matrix:
+        include:
+          - os: macOS
+            runner: macos-latest
+            ext: dmg
+          - os: Windows
+            runner: windows-latest
+            ext: msi     # build.gradle.kts uses TargetFormat.Msi, NOT .exe
+          - os: Linux
+            runner: ubuntu-latest
+            ext: deb
 
     steps:
       - uses: actions/checkout@v4
@@ -82,103 +157,230 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Build Desktop
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Build desktop package
         run: ./gradlew packageDistributionForCurrentOS --no-daemon
 
-      - name: Normalize Desktop Artifact
+      - name: Collect + checksum (Unix)
+        if: matrix.os != 'Windows'
         run: |
-          FILE=$(find . \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" \) | head -n 1)
-          EXT="${FILE##*.}"
-          cp "$FILE" "sharedrop.$EXT"
+          FILE=$(find . -name "*.${{ matrix.ext }}" -not -path "./.gradle/*" | head -n 1)
+          cp "$FILE" "sharedrop-${{ matrix.os }}.${{ matrix.ext }}"
+          sha256sum "sharedrop-${{ matrix.os }}.${{ matrix.ext }}" > "sharedrop-${{ matrix.os }}.${{ matrix.ext }}.sha256"
+
+      - name: Collect + checksum (Windows)
+        if: matrix.os == 'Windows'
+        shell: pwsh
+        run: |
+          $file = Get-ChildItem -Recurse -Include "*.${{ matrix.ext }}" |
+            Where-Object { $_.FullName -notlike "*\.gradle\*" } |
+            Select-Object -First 1
+          Copy-Item $file.FullName "sharedrop-${{ matrix.os }}.${{ matrix.ext }}"
+          $hash = (Get-FileHash "sharedrop-${{ matrix.os }}.${{ matrix.ext }}" -Algorithm SHA256).Hash.ToLower()
+          "$hash  sharedrop-${{ matrix.os }}.${{ matrix.ext }}" |
+            Out-File -Encoding ASCII "sharedrop-${{ matrix.os }}.${{ matrix.ext }}.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: desktop-bin
-          path: sharedrop.*
+          name: desktop-${{ matrix.os }}
+          path: sharedrop-${{ matrix.os }}.*
 
-# ---------------------------
-# 3. VALIDATION (STRICT)
-# ---------------------------
-  validate:
+# ─────────────────────────────────────────────────────────────────
+# STAGE 3 · ASSEMBLE
+# Pull every platform artifact together, verify integrity,
+# and generate a manifest.json that describes the whole build.
+# ─────────────────────────────────────────────────────────────────
+  assemble:
+    name: "Assemble · Verify + Manifest"
     runs-on: ubuntu-latest
-    needs: [build-android, build-desktop]
+    needs: [guard, build-android, build-desktop]
 
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: android-apk
-          path: android/
+          name: android
+          path: dist/android/
 
       - uses: actions/download-artifact@v4
         with:
-          name: desktop-bin
-          path: desktop/
+          pattern: desktop-*
+          merge-multiple: true
+          path: dist/
 
-      - name: Validate APK Exists
-        run: test -f android/sharedrop.apk
+      # APK structural check (not just "does the file exist")
+      - name: Verify APK
+        run: |
+          test -f dist/android/sharedrop.apk
+          unzip -t dist/android/sharedrop.apk
+          unzip -l dist/android/sharedrop.apk | grep -q AndroidManifest.xml
+          echo "✓ APK verified"
 
-      - name: Validate APK Integrity
-        run: unzip -t android/sharedrop.apk
+      # Confirm all three desktop installers arrived
+      - name: Verify desktop artifacts
+        run: |
+          test -f "dist/sharedrop-macOS.dmg"
+          test -f "dist/sharedrop-Windows.msi"
+          test -f "dist/sharedrop-Linux.deb"
+          echo "✓ All desktop artifacts present"
 
-      - name: Validate Manifest
-        run: unzip -l android/sharedrop.apk | grep AndroidManifest.xml
+      # Cross-check the SHA256 files against the actual bytes
+      - name: Verify checksums
+        run: |
+          sha256sum -c dist/android/sharedrop.apk.sha256
+          sha256sum -c dist/sharedrop-macOS.dmg.sha256
+          sha256sum -c dist/sharedrop-Linux.deb.sha256
+          echo "✓ Checksums valid"
 
-      - name: Validate Desktop Artifact
-        run: ls desktop/sharedrop.*
+      # Bundle metadata that gets published alongside the installers
+      - name: Generate manifest.json
+        run: |
+          cat > dist/manifest.json << EOF
+          {
+            "version":      "${{ needs.guard.outputs.version }}",
+            "build_number": "${{ github.run_number }}",
+            "commit":       "${{ github.sha }}",
+            "branch":       "${{ github.ref_name }}",
+            "timestamp":    "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "stable":       ${{ needs.guard.outputs.is_prerelease == 'false' }},
+            "artifacts": {
+              "android": { "file": "sharedrop.apk",         "platform": "Android 7.0+" },
+              "macos":   { "file": "sharedrop-macOS.dmg",   "platform": "macOS" },
+              "windows": { "file": "sharedrop-Windows.msi", "platform": "Windows" },
+              "linux":   { "file": "sharedrop-Linux.deb",   "platform": "Linux (Debian/Ubuntu)" }
+            }
+          }
+          EOF
 
-# ---------------------------
-# 4. RUNTIME TEST (ONLY MAIN)
-# ---------------------------
-  runtime-test:
+      # Flatten APK up one level so upload paths are consistent
+      - name: Flatten dist
+        run: |
+          cp dist/android/sharedrop.apk       dist/sharedrop.apk
+          cp dist/android/sharedrop.apk.sha256 dist/sharedrop.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            dist/sharedrop.apk
+            dist/sharedrop.apk.sha256
+            dist/sharedrop-macOS.dmg
+            dist/sharedrop-macOS.dmg.sha256
+            dist/sharedrop-Windows.msi
+            dist/sharedrop-Windows.msi.sha256
+            dist/sharedrop-Linux.deb
+            dist/sharedrop-Linux.deb.sha256
+            dist/manifest.json
+
+# ─────────────────────────────────────────────────────────────────
+# STAGE 4 · SMOKE TEST  (main only — skipped for dev pre-release)
+#
+# Runs only when is_prerelease == false, i.e. main branch.
+# Using API 34 (closer to targetSdk 36) instead of 29.
+# KVM is enabled explicitly for faster emulator boot on GitHub runners.
+# The release job below handles the "skipped" case safely.
+# ─────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: "Smoke · Android Emulator"
     runs-on: ubuntu-latest
-    needs: validate
-    if: github.ref == 'refs/heads/main'
+    needs: [guard, assemble]
+    if: |
+      needs.guard.outputs.should_release == 'true' &&
+      needs.guard.outputs.is_prerelease  == 'false'
 
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: android-apk
-          path: android/
+          name: release-bundle
+          path: dist/
 
-      - name: Emulator Test
+      - name: Enable KVM (faster emulator boot)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run emulator smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 29
-          arch: x86
+          api-level: 34
+          arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
-            adb wait-for-device
-            adb install android/sharedrop.apk
-            adb shell monkey -p org.nitish.project.sharedrop -c android.intent.category.LAUNCHER 1
+            adb wait-for-device shell \
+              'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
+            adb install dist/sharedrop.apk
+            adb shell monkey -p org.nitish.project.sharedrop \
+              -c android.intent.category.LAUNCHER 1
+            echo "✓ Smoke test passed"
 
-# ---------------------------
-# 5. RELEASE (STRICT ORDER)
-# ---------------------------
+# ─────────────────────────────────────────────────────────────────
+# STAGE 5 · RELEASE
+#
+# Two tiers:
+#   main → stable release (requires smoke-test to pass)
+#   dev  → pre-release (smoke-test was skipped, that's fine)
+#
+# The always() + explicit result checks is the correct way to
+# depend on a conditionally-skipped job. The original pipeline
+# used needs: [validate, runtime-test] which is fragile — if the
+# conditions ever diverged, release would silently be skipped too.
+# ─────────────────────────────────────────────────────────────────
   release:
+    name: "Release · ${{ needs.guard.outputs.is_prerelease == 'true' && 'pre-release (dev)' || 'stable (main)' }}"
     runs-on: ubuntu-latest
-    needs: [validate, runtime-test]
-    if: github.ref == 'refs/heads/main'
+    needs: [guard, assemble, smoke-test]
+    if: |
+      always() &&
+      needs.guard.result    == 'success' &&
+      needs.assemble.result == 'success' &&
+      needs.guard.outputs.should_release == 'true' &&
+      (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')
 
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: android-apk
-          path: android/
+          name: release-bundle
+          path: dist/
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: desktop-bin
-          path: desktop/
-
-      - name: Generate Version
-        id: version
-        run: echo "VERSION=v$(date +'%Y.%m.%d')-${{ github.run_number }}" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.VERSION }}
-          name: Release ${{ steps.version.outputs.VERSION }}
+          tag_name:   ${{ needs.guard.outputs.version }}
+          name:       "ShareDrop ${{ needs.guard.outputs.version }}"
+          prerelease: ${{ needs.guard.outputs.is_prerelease }}
+          body: |
+            ## ShareDrop ${{ needs.guard.outputs.version }}
+
+            ${{ needs.guard.outputs.is_prerelease == 'true' && '> ⚠️ **Pre-release** — built from `dev`. Not recommended for production use.' || '> ✅ **Stable release** — built from `main`.' }}
+
+            **Branch:** `${{ github.ref_name }}`
+            **Commit:** `${{ github.sha }}`
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | 🤖 Android | `sharedrop.apk` |
+            | 🍎 macOS | `sharedrop-macOS.dmg` |
+            | 🪟 Windows | `sharedrop-Windows.msi` |
+            | 🐧 Linux | `sharedrop-Linux.deb` |
+
+            SHA256 checksum files are attached for every installer.
+            A `manifest.json` with full build metadata is also included.
           files: |
-            android/sharedrop.apk
-            desktop/sharedrop.*
+            dist/sharedrop.apk
+            dist/sharedrop.apk.sha256
+            dist/sharedrop-macOS.dmg
+            dist/sharedrop-macOS.dmg.sha256
+            dist/sharedrop-Windows.msi
+            dist/sharedrop-Windows.msi.sha256
+            dist/sharedrop-Linux.deb
+            dist/sharedrop-Linux.deb.sha256
+            dist/manifest.json
