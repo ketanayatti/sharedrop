@@ -6,17 +6,17 @@ It's built with Kotlin Multiplatform and Compose Multiplatform, so most of the c
 
 ---
 
-## 📥 Download
+##  Download
 
-### 🚀 Latest Version
+###  Latest Version
 
-#### 📱 Android
+####  Android
 
 [![Download APK](https://img.shields.io/badge/Download-Android%20APK-green?style=for-the-badge&logo=android)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.apk)
 
 ---
 
-#### 💻 Desktop
+####  Desktop
 
 [![Download macOS (DMG)](https://img.shields.io/badge/Download-macOS%20DMG-black?style=for-the-badge&logo=apple)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.dmg)
 
@@ -26,7 +26,7 @@ It's built with Kotlin Multiplatform and Compose Multiplatform, so most of the c
 
 ---
 
-👉 [View All Releases](https://github.com/nitish058/sharedrop/releases)
+ [View All Releases](https://github.com/nitish058/sharedrop/releases)
 
 ## Screenshots
 
