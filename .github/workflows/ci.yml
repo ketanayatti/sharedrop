@@ -233,9 +233,9 @@ jobs:
       # Cross-check the SHA256 files against the actual bytes
       - name: Verify checksums
         run: |
-          sha256sum -c dist/android/sharedrop.apk.sha256
-          sha256sum -c dist/sharedrop-macOS.dmg.sha256
-          sha256sum -c dist/sharedrop-Linux.deb.sha256
+          cd dist/android && sha256sum -c sharedrop.apk.sha256
+          cd ../../dist && sha256sum -c sharedrop-macOS.dmg.sha256
+          sha256sum -c sharedrop-Linux.deb.sha256
           echo "✓ Checksums valid"
 
       # Bundle metadata that gets published alongside the installers
