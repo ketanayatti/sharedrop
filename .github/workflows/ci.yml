@@ -275,8 +275,7 @@ jobs:
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
-            adb wait-for-device shell \
-              'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
+            adb wait-for-device shell 'while [ -z "$(getprop sys.boot_completed)" ]; do sleep 1; done'
             adb install dist/sharedrop.apk
             adb shell monkey -p org.nitish.project.sharedrop \
               -c android.intent.category.LAUNCHER 1
