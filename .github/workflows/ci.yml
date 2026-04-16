@@ -234,7 +234,8 @@ jobs:
       - name: Verify checksums
         run: |
           cd dist/android && sha256sum -c sharedrop.apk.sha256
-          cd ../../dist && sha256sum -c sharedrop-macOS.dmg.sha256
+          cd .. && sha256sum -c sharedrop-macOS.dmg.sha256
+          sha256sum -c sharedrop-Windows.msi.sha256
           sha256sum -c sharedrop-Linux.deb.sha256
           echo "✓ Checksums valid"
 
