@@ -16,11 +16,6 @@ concurrency:
 env:
   JAVA_VERSION: '17'
 
-# ─────────────────────────────────────────────────────────────────
-# STAGE 1 · GUARD
-# Lint + tests first. Nothing runs if this fails.
-# Also decides version and whether this push should produce a release.
-# ─────────────────────────────────────────────────────────────────
 jobs:
   guard:
     name: "Guard · Lint + Tests"
@@ -49,50 +44,32 @@ jobs:
       - name: Lint
         run: ./gradlew lint --no-daemon
 
-      # Run both Android and JVM unit tests — the original only ran Android
       - name: Unit tests (Android + JVM)
         run: ./gradlew testDebugUnitTest jvmTest --no-daemon
 
-      # Compute version + release intent once. All downstream jobs read outputs.
       - name: Set build metadata
         id: meta
         run: |
           VERSION="v$(date +'%Y.%m.%d')-${{ github.run_number }}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-          # PRs: build and test, never release
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo "should_release=false" >> $GITHUB_OUTPUT
             echo "is_prerelease=false"  >> $GITHUB_OUTPUT
 
-          # main: stable release
           elif [[ "${{ github.ref_name }}" == "main" ]]; then
             echo "should_release=true"  >> $GITHUB_OUTPUT
             echo "is_prerelease=false"  >> $GITHUB_OUTPUT
 
-          # dev: pre-release (lets contributors download real builds)
           elif [[ "${{ github.ref_name }}" == "dev" ]]; then
             echo "should_release=true"  >> $GITHUB_OUTPUT
             echo "is_prerelease=true"   >> $GITHUB_OUTPUT
 
-          # feature branches: build only, no release
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
             echo "is_prerelease=false"  >> $GITHUB_OUTPUT
           fi
 
-# ─────────────────────────────────────────────────────────────────
-# STAGE 2 · PLATFORM BUILDS (parallel)
-#
-# Android runs on ubuntu.
-# Desktop uses a 3-way matrix so all three OS installers are built
-# in parallel — the original only built macOS and would produce a
-# .dmg but never an .msi or .deb.
-#
-# Note: build.gradle.kts declares TargetFormat.Dmg, .Msi, .Deb —
-# so the correct Windows extension is .msi, not .exe.
-# Each job also drops a SHA256 checksum file alongside its artifact.
-# ─────────────────────────────────────────────────────────────────
   build-android:
     name: "Build · Android APK"
     runs-on: ubuntu-latest
@@ -192,11 +169,7 @@ jobs:
           name: desktop-${{ matrix.os }}
           path: sharedrop-${{ matrix.os }}.*
 
-# ─────────────────────────────────────────────────────────────────
-# STAGE 3 · ASSEMBLE
-# Pull every platform artifact together, verify integrity,
-# and generate a manifest.json that describes the whole build.
-# ─────────────────────────────────────────────────────────────────
+
   assemble:
     name: "Assemble · Verify + Manifest"
     runs-on: ubuntu-latest
@@ -214,7 +187,6 @@ jobs:
           merge-multiple: true
           path: dist/
 
-      # APK structural check (not just "does the file exist")
       - name: Verify APK
         run: |
           test -f dist/android/sharedrop.apk
@@ -222,7 +194,6 @@ jobs:
           unzip -l dist/android/sharedrop.apk | grep -q AndroidManifest.xml
           echo "✓ APK verified"
 
-      # Confirm all three desktop installers arrived
       - name: Verify desktop artifacts
         run: |
           test -f "dist/sharedrop-macOS.dmg"
@@ -230,7 +201,6 @@ jobs:
           test -f "dist/sharedrop-Linux.deb"
           echo "✓ All desktop artifacts present"
 
-      # Cross-check the SHA256 files against the actual bytes
       - name: Verify checksums
         run: |
           cd dist/android && sha256sum -c sharedrop.apk.sha256
@@ -239,7 +209,6 @@ jobs:
           sha256sum -c sharedrop-Linux.deb.sha256
           echo "✓ Checksums valid"
 
-      # Bundle metadata that gets published alongside the installers
       - name: Generate manifest.json
         run: |
           cat > dist/manifest.json << EOF
@@ -259,7 +228,6 @@ jobs:
           }
           EOF
 
-      # Flatten APK up one level so upload paths are consistent
       - name: Flatten dist
         run: |
           cp dist/android/sharedrop.apk       dist/sharedrop.apk
@@ -279,14 +247,6 @@ jobs:
             dist/sharedrop-Linux.deb.sha256
             dist/manifest.json
 
-# ─────────────────────────────────────────────────────────────────
-# STAGE 4 · SMOKE TEST  (main only — skipped for dev pre-release)
-#
-# Runs only when is_prerelease == false, i.e. main branch.
-# Using API 34 (closer to targetSdk 36) instead of 29.
-# KVM is enabled explicitly for faster emulator boot on GitHub runners.
-# The release job below handles the "skipped" case safely.
-# ─────────────────────────────────────────────────────────────────
   smoke-test:
     name: "Smoke · Android Emulator"
     runs-on: ubuntu-latest
@@ -322,18 +282,6 @@ jobs:
               -c android.intent.category.LAUNCHER 1
             echo "✓ Smoke test passed"
 
-# ─────────────────────────────────────────────────────────────────
-# STAGE 5 · RELEASE
-#
-# Two tiers:
-#   main → stable release (requires smoke-test to pass)
-#   dev  → pre-release (smoke-test was skipped, that's fine)
-#
-# The always() + explicit result checks is the correct way to
-# depend on a conditionally-skipped job. The original pipeline
-# used needs: [validate, runtime-test] which is fragile — if the
-# conditions ever diverged, release would silently be skipped too.
-# ─────────────────────────────────────────────────────────────────
   release:
     name: "Release · ${{ needs.guard.outputs.is_prerelease == 'true' && 'pre-release (dev)' || 'stable (main)' }}"
     runs-on: ubuntu-latest
