@@ -178,7 +178,7 @@ jobs:
             ext: dmg
           - os: Windows
             runner: windows-latest
-            ext: msi
+            ext: msi     # build.gradle.kts uses TargetFormat.Msi, NOT .exe
           - os: Linux
             runner: ubuntu-latest
             ext: deb
