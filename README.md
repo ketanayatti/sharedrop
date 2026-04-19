@@ -10,12 +10,12 @@ It's built with Kotlin Multiplatform and Compose Multiplatform, so most of the c
 
 ### Latest Version
 
-| Platform | Download |
-| :------- | :------- |
-| Android | [![Download](https://img.shields.io/badge/Download-inactive?style=for-the-badge)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.apk) |
-| macOS | [![Download](https://img.shields.io/badge/Download-inactive?style=for-the-badge)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.dmg) |
-| Windows | [![Download](https://img.shields.io/badge/Download-inactive?style=for-the-badge)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.exe) |
-| Linux | [![Download](https://img.shields.io/badge/Download-inactive?style=for-the-badge)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.deb) |
+| Platform | Download                                                                                                                                                         |
+| :------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android  | [![Download](https://img.shields.io/badge/Download-inactive?style=for-the-badge)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.apk) |
+| macOS    | [![Download](https://img.shields.io/badge/Download-inactive?style=for-the-badge)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.dmg) |
+| Windows  | [![Download](https://img.shields.io/badge/Download-inactive?style=for-the-badge)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.exe) |
+| Linux    | [![Download](https://img.shields.io/badge/Download-inactive?style=for-the-badge)](https://github.com/nitish058/sharedrop/releases/latest/download/sharedrop.deb) |
 
 [View All Releases](https://github.com/nitish058/sharedrop/releases) for additional builds and older versions.
 

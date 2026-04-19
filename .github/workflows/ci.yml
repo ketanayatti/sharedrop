@@ -91,14 +91,37 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - name: Build APK
+      - name: Setup keystore for signing
+        run: |
+          if [ -z "${{ secrets.KEYSTORE_CONTENT }}" ]; then
+            echo "⚠️  Keystore secret not configured - APK will not be signed"
+            echo "To enable signing, add KEYSTORE_CONTENT secret to GitHub repository settings"
+          else
+            echo "${{ secrets.KEYSTORE_CONTENT }}" | base64 -d > release.keystore
+            echo "✓ Keystore configured"
+          fi
+
+      - name: Build APK (Release)
+        env:
+          BUILD_VERSION: ${{ needs.guard.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          KEYSTORE_PATH: ${{ github.workspace }}/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew :composeApp:assembleRelease --no-daemon
 
       - name: Collect + checksum
         run: |
-          APK=$(find composeApp/build/outputs -name "*release*.apk" | head -n 1)
+          APK=$(find composeApp/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK not found in composeApp/build/outputs/apk/release"
+            exit 1
+          fi
           cp "$APK" sharedrop.apk
           sha256sum sharedrop.apk > sharedrop.apk.sha256
+          echo "✓ APK collected: $(ls -lh sharedrop.apk)"
+          echo "✓ SHA256: $(cat sharedrop.apk.sha256)"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -155,7 +178,7 @@ jobs:
             ext: dmg
           - os: Windows
             runner: windows-latest
-            ext: msi     # build.gradle.kts uses TargetFormat.Msi, NOT .exe
+            ext: msi
           - os: Linux
             runner: ubuntu-latest
             ext: deb
@@ -177,26 +200,41 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Build desktop package
+        env:
+          BUILD_VERSION: ${{ needs.guard.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: ./gradlew packageDistributionForCurrentOS --no-daemon
 
       - name: Collect + checksum (Unix)
         if: matrix.os != 'Windows'
         run: |
-          FILE=$(find . -name "*.${{ matrix.ext }}" -not -path "./.gradle/*" | head -n 1)
+          FILE=$(find composeApp/build/compose/binaries/main -name "*.${{ matrix.ext }}" -type f | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "ERROR: .${{ matrix.ext }} file not found"
+            ls -la composeApp/build/compose/binaries/main/ || echo "Directory not found"
+            exit 1
+          fi
           cp "$FILE" "sharedrop-${{ matrix.os }}.${{ matrix.ext }}"
-          sha256sum "sharedrop-${{ matrix.os }}.${{ matrix.ext }}" > "sharedrop-${{ matrix.os }}.${{ matrix.ext }}.sha256"
+          SHA256=$(sha256sum "sharedrop-${{ matrix.os }}.${{ matrix.ext }}" | awk '{print $1}')
+          echo "$SHA256  sharedrop-${{ matrix.os }}.${{ matrix.ext }}" > "sharedrop-${{ matrix.os }}.${{ matrix.ext }}.sha256"
+          echo "✓ Built: $(ls -lh sharedrop-${{ matrix.os }}.*)"
+          echo "✓ SHA256: $SHA256"
 
       - name: Collect + checksum (Windows)
         if: matrix.os == 'Windows'
         shell: pwsh
         run: |
-          $file = Get-ChildItem -Recurse -Include "*.${{ matrix.ext }}" |
-            Where-Object { $_.FullName -notlike "*\.gradle\*" } |
-            Select-Object -First 1
+          $file = Get-ChildItem -Recurse -Path "composeApp/build/compose/binaries/main" -Include "*.${{ matrix.ext }}" -File | Select-Object -First 1
+          if ($null -eq $file) {
+            Write-Error "ERROR: .${{ matrix.ext }} file not found"
+            Get-ChildItem -Path "composeApp/build/compose/binaries/main" -Recurse | Select-Object FullName
+            exit 1
+          }
           Copy-Item $file.FullName "sharedrop-${{ matrix.os }}.${{ matrix.ext }}"
           $hash = (Get-FileHash "sharedrop-${{ matrix.os }}.${{ matrix.ext }}" -Algorithm SHA256).Hash.ToLower()
-          "$hash  sharedrop-${{ matrix.os }}.${{ matrix.ext }}" |
-            Out-File -Encoding ASCII "sharedrop-${{ matrix.os }}.${{ matrix.ext }}.sha256"
+          "$hash  sharedrop-${{ matrix.os }}.${{ matrix.ext }}" | Out-File -Encoding ASCII "sharedrop-${{ matrix.os }}.${{ matrix.ext }}.sha256"
+          Write-Output "✓ Built: $(Get-Item sharedrop-${{ matrix.os }}.* | ForEach-Object { $_.Name + " (" + $_.Length + " bytes)" })"
+          Write-Output "✓ SHA256: $hash"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -221,27 +259,36 @@ jobs:
           merge-multiple: true
           path: dist/
 
-      - name: Verify APK
+      - name: Verify APK structure
         run: |
-          test -f dist/android/sharedrop.apk
-          unzip -t dist/android/sharedrop.apk
-          unzip -l dist/android/sharedrop.apk | grep -q AndroidManifest.xml
+          test -f dist/android/sharedrop.apk || (echo "ERROR: APK not found" && exit 1)
+          unzip -t dist/android/sharedrop.apk > /dev/null || (echo "ERROR: APK corrupted" && exit 1)
+          unzip -l dist/android/sharedrop.apk | grep -q AndroidManifest.xml || (echo "ERROR: Missing AndroidManifest.xml" && exit 1)
           echo "✓ APK verified"
 
-      - name: Verify desktop artifacts
+      - name: Verify desktop artifacts present
         run: |
-          test -f "dist/sharedrop-macOS.dmg"
-          test -f "dist/sharedrop-Windows.msi"
-          test -f "dist/sharedrop-Linux.deb"
+          test -f "dist/sharedrop-macOS.dmg" || (echo "ERROR: macOS DMG not found" && exit 1)
+          test -f "dist/sharedrop-Windows.msi" || (echo "ERROR: Windows MSI not found" && exit 1)
+          test -f "dist/sharedrop-Linux.deb" || (echo "ERROR: Linux DEB not found" && exit 1)
           echo "✓ All desktop artifacts present"
 
-      - name: Verify checksums
+      - name: Verify checksums exist
         run: |
-          cd dist/android && sha256sum -c sharedrop.apk.sha256
-          cd .. && sha256sum -c sharedrop-macOS.dmg.sha256
-          sha256sum -c sharedrop-Windows.msi.sha256
-          sha256sum -c sharedrop-Linux.deb.sha256
-          echo "✓ Checksums valid"
+          test -f dist/android/sharedrop.apk.sha256 || (echo "ERROR: APK checksum missing" && exit 1)
+          test -f "dist/sharedrop-macOS.dmg.sha256" || (echo "ERROR: macOS checksum missing" && exit 1)
+          test -f "dist/sharedrop-Windows.msi.sha256" || (echo "ERROR: Windows checksum missing" && exit 1)
+          test -f "dist/sharedrop-Linux.deb.sha256" || (echo "ERROR: Linux checksum missing" && exit 1)
+          echo "✓ All checksums present"
+
+      - name: Verify checksums valid
+        run: |
+          cd dist/android && sha256sum -c sharedrop.apk.sha256 || (echo "ERROR: APK checksum invalid" && exit 1)
+          cd ..
+          sha256sum -c sharedrop-macOS.dmg.sha256 || (echo "ERROR: macOS checksum invalid" && exit 1)
+          sha256sum -c sharedrop-Windows.msi.sha256 || (echo "ERROR: Windows checksum invalid" && exit 1)
+          sha256sum -c sharedrop-Linux.deb.sha256 || (echo "ERROR: Linux checksum invalid" && exit 1)
+          echo "✓ All checksums valid"
 
       - name: Generate manifest.json
         run: |
@@ -261,25 +308,18 @@ jobs:
             }
           }
           EOF
+          cat dist/manifest.json
 
-      - name: Flatten dist
+      - name: Flatten dist for release
         run: |
           cp dist/android/sharedrop.apk       dist/sharedrop.apk
           cp dist/android/sharedrop.apk.sha256 dist/sharedrop.apk.sha256
+          echo "✓ Release bundle prepared"
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-bundle
-          path: |
-            dist/sharedrop.apk
-            dist/sharedrop.apk.sha256
-            dist/sharedrop-macOS.dmg
-            dist/sharedrop-macOS.dmg.sha256
-            dist/sharedrop-Windows.msi
-            dist/sharedrop-Windows.msi.sha256
-            dist/sharedrop-Linux.deb
-            dist/sharedrop-Linux.deb.sha256
-            dist/manifest.json
+          path: dist/
 
   smoke-test:
     name: "Smoke · Android Emulator"
@@ -334,6 +374,16 @@ jobs:
           name: release-bundle
           path: dist/
 
+      - name: Verify release bundle
+        run: |
+          echo "=== Release Bundle Contents ==="
+          ls -lh dist/
+          echo ""
+          echo "=== Manifest ==="
+          cat dist/manifest.json
+          echo ""
+          echo "✓ Release bundle ready"
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -349,15 +399,23 @@ jobs:
             **Commit:** `${{ github.sha }}`
 
             ### Downloads
-            | Platform | File |
-            |----------|------|
-            | 🤖 Android | `sharedrop.apk` |
-            | 🍎 macOS | `sharedrop-macOS.dmg` |
-            | 🪟 Windows | `sharedrop-Windows.msi` |
-            | 🐧 Linux | `sharedrop-Linux.deb` |
+            | Platform | File | Checksum |
+            |----------|------|----------|
+            | 🤖 Android | `sharedrop.apk` | `sharedrop.apk.sha256` |
+            | 🍎 macOS | `sharedrop-macOS.dmg` | `sharedrop-macOS.dmg.sha256` |
+            | 🪟 Windows | `sharedrop-Windows.msi` | `sharedrop-Windows.msi.sha256` |
+            | 🐧 Linux | `sharedrop-Linux.deb` | `sharedrop-Linux.deb.sha256` |
 
-            SHA256 checksum files are attached for every installer.
-            A `manifest.json` with full build metadata is also included.
+            ### Verification
+            ```bash
+            sha256sum -c sharedrop.apk.sha256
+            sha256sum -c sharedrop-macOS.dmg.sha256
+            sha256sum -c sharedrop-Windows.msi.sha256
+            sha256sum -c sharedrop-Linux.deb.sha256
+            ```
+
+            ### Build Metadata
+            See `manifest.json` for complete build information.
           files: |
             dist/sharedrop.apk
             dist/sharedrop.apk.sha256
@@ -368,3 +426,4 @@ jobs:
             dist/sharedrop-Linux.deb
             dist/sharedrop-Linux.deb.sha256
             dist/manifest.json
+          fail_on_unmatched_files: true

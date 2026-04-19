@@ -82,17 +82,30 @@ android {
         applicationId = "org.nitish.project.sharedrop"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1
+        versionName = System.getenv("BUILD_VERSION") ?: "1.0.0"
     }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "keystore.jks")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("KEY_ALIAS") ?: "sharedrop"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+        }
+    }
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
+            // Conditionally apply signing if keystore file exists
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            if (!keystorePath.isNullOrEmpty() && file(keystorePath).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
@@ -112,7 +125,11 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "org.nitish.project.sharedrop"
-            packageVersion = "1.0.0"
+            // Convert v2026.04.19-36 -> 1.0.36 (MSI format: MAJOR.MINOR.BUILD where max values are 255.255.65535)
+            packageVersion = System.getenv("BUILD_VERSION")?.let { ver ->
+                val buildNum = ver.substringAfterLast("-").toIntOrNull() ?: 0
+                "1.0.${buildNum}"
+            } ?: "1.0.0"
         }
     }
 }
