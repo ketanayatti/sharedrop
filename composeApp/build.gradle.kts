@@ -125,7 +125,12 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "org.nitish.project.sharedrop"
-            packageVersion = System.getenv("BUILD_VERSION")?.replaceFirst("v", "")?.replace("-", ".") ?: "1.0.0"
+            // Convert v2026.04.19-36 -> 2026.4.19 (remove leading zeros, drop build number)
+            packageVersion = System.getenv("BUILD_VERSION")
+                ?.replaceFirst("v", "")                    // v2026.04.19-36 -> 2026.04.19-36
+                ?.substringBefore("-")                     // 2026.04.19-36 -> 2026.04.19
+                ?.replace(Regex("\\.0+"), ".")             // Remove leading zeros: 2026.04.19 -> 2026.4.19
+                ?: "1.0.0"
         }
     }
 }
