@@ -119,7 +119,7 @@ jobs:
             exit 1
           fi
           cp "$APK" sharedrop.apk
-          sha256sum sharedrop.apk | awk '{print $1}' > sharedrop.apk.sha256
+          sha256sum sharedrop.apk > sharedrop.apk.sha256
           echo "✓ APK collected: $(ls -lh sharedrop.apk)"
           echo "✓ SHA256: $(cat sharedrop.apk.sha256)"
 
